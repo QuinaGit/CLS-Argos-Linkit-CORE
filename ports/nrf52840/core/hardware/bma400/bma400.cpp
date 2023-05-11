@@ -1,8 +1,5 @@
 #include <map>
 
-#include "bma400.h"
-#include "bma400.hpp"
-
 #include "debug.hpp"
 #include "nrf_delay.h"
 #include "nrf_i2c.hpp"
@@ -11,6 +8,7 @@
 #include "pmu.hpp"
 #include "error.hpp"
 #include "nrf_irq.hpp"
+#include "bma400.hpp"
 
 class BMA400LLManager {
 private:
@@ -159,6 +157,8 @@ void BMA400LL::delay_us(uint32_t period, void *intf_ptr)
 
 double BMA400LL::convert_g_force(unsigned int g_scale, int16_t axis_value)
 {
+    // acc_x = acc_c_7_0 + 256*acc_x_11_8
+    // if(acc_x > 2047) acc_x = acc_x-4096
 	return (double)g_scale * axis_value / 32768;
 }
 
@@ -194,7 +194,6 @@ void BMA400LL::bma400_check_rslt(const char api_name[], int8_t rslt)
 
 }
 
-//todo: this is where I should read 128 samples at 20Hz so -> PMU:delay_ms()
 void BMA400LL::read_xyz(double& x, double& y, double& z)
 {
     int8_t rslt;
@@ -227,6 +226,58 @@ void BMA400LL::read_xyz(double& x, double& y, double& z)
     // Turn accelerometer on so AXL is updated
     rslt = bma400_set_power_mode(BMA400_MODE_SLEEP, &m_bma400_dev);
     bma400_check_rslt("BMA400LL::read_xyz() bma400_set_power_mode sleep", rslt);
+}
+
+//todo: this is where I should read 128 samples at 20Hz so -> PMU:delay_ms()
+void BMA400LL::predict_movement(uint8_t& prediction)
+{
+    int8_t rslt;
+    // int16_t x;
+    // int16_t y;
+    // int16_t z;
+    // Turn accelerometer on so AXL is updated
+    rslt = bma400_set_power_mode(BMA400_MODE_NORMAL, &m_bma400_dev);
+    bma400_check_rslt("BMA400LL::predict_movement() bma400_set_power_mode normal", rslt);
+
+    // Wait 50ms for reading (4 averaged samples, @ 100 Hz)
+    PMU::delay_ms(50);
+
+    // Read and convert accelerometer values
+    // union __attribute__((packed)) {
+    //     uint8_t buffer[6];
+    //     struct {
+    //     	int16_t x;
+    //     	int16_t y;
+    //     	int16_t z;
+    //     };
+    // } data;
+
+    // for (size_t i = 0; i < 128; i++)
+    // {
+    
+    //     rslt = bma400_get_regs(BMA400_REG_ACCEL_DATA, data.buffer, sizeof(data.buffer), &m_bma400_dev);
+    //     // bma400_check_rslt("BMA400LL::predict_movement() bma400_get_regs", rslt);
+
+    //     // Convert to double precision G-force result on each axis
+    //     x = convert_g_force(16, data.x);
+    //     y = convert_g_force(16, data.y);
+    //     z = convert_g_force(16, data.z);
+
+    //     DEBUG_TRACE("BMA400LL::predict_movement: xyz=%f,%f,%f", x, y, z);
+    // }
+    
+    // read 128 samples periodically and save to buffer
+    read_128_samples(BMA400_PREDICT_READ_INTERVAL_MS);
+
+    // algorythm here 
+    // 1. read buffer (to be created) todo
+    // 2. run convert_g_force() on the data
+    // 3. run algorythm -> pass to m_last_predict
+    prediction = 1;
+    
+    // Turn accelerometer on so AXL is updated
+    rslt = bma400_set_power_mode(BMA400_MODE_SLEEP, &m_bma400_dev);
+    bma400_check_rslt("BMA400LL::predict_movement() bma400_set_power_mode sleep", rslt);
 }
 
 double BMA400LL::read_temperature()
@@ -359,6 +410,10 @@ double BMA400::read(unsigned int offset)
 	case 4: // IRQ pending
 		return (double)m_bma400.check_and_clear_wakeup();
 		break;
+    case 5: // Predict movement
+        m_bma400.predict_movement(m_last_predict);
+        return m_last_predict;
+        break;
 	default:
 		return 0;
 	}

@@ -6,6 +6,7 @@
 #include "timeutils.hpp"
 
 struct __attribute__((packed)) AXLLogEntry {
+	// union { //todo: think about this possibility
 	LogHeader header;
 	union {
 		struct {
@@ -14,9 +15,12 @@ struct __attribute__((packed)) AXLLogEntry {
 			double z;
 			double temperature;
 			bool   wakeup_triggered;
+			uint8_t movement_predict; // todo: maybe use up the whole AXLLogEntry data buffer to log readings (maybe only one axis)
 		};
-		uint8_t data[MAX_LOG_PAYLOAD];
+		uint8_t data[MAX_LOG_PAYLOAD]; // log payload is basically 128-9 = 119 bytes
 	};
+	// uint8_t axl_data_stream;
+	// };
 };
 
 class AXLLogFormatter : public LogFormatter {
@@ -47,7 +51,8 @@ enum AXLSensorPort : unsigned int {
 	X,
 	Y,
 	Z,
-	WAKEUP_TRIGGERED
+	WAKEUP_TRIGGERED,
+	MOVEMENT_PREDICT
 };
 
 enum AXLCalibration : unsigned int {
@@ -73,6 +78,7 @@ private:
 		log->z = m_sensor.read(AXLSensorPort::Z);
 		log->wakeup_triggered = m_sensor.read(AXLSensorPort::WAKEUP_TRIGGERED);
 		log->temperature = m_sensor.read((unsigned int)AXLSensorPort::TEMPERATURE);
+		log->movement_predict = m_sensor.read(AXLSensorPort::MOVEMENT_PREDICT);
 		service_set_log_header_time(log->header, service_current_time());
 	}
 #pragma GCC diagnostic pop

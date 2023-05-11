@@ -4,13 +4,18 @@
 #include <cstdint>
 #include "sensor.hpp"
 #include "nrf_irq.hpp"
+#include "timer.hpp"
+#include "bma400.h"
 
 extern "C" {
 #include "bma400_defs.h"
 }
 
+extern Timer *system_timer;
+
 /*! Read write length varies based on user requirement */
-#define BMA400_READ_WRITE_LENGTH  UINT8_C(64)
+#define BMA400_READ_WRITE_LENGTH  		UINT8_C(64)
+#define BMA400_PREDICT_READ_INTERVAL_MS	UINT8_C(50)
 
 class BMA400LL
 {
@@ -21,11 +26,21 @@ public:
 	~BMA400LL();
 	double read_temperature();
 	void read_xyz(double& x, double& y, double& z);
+	void predict_movement(uint8_t& last_predict);
 	void set_wakeup_threshold(double threshold);
 	void set_wakeup_duration(double duration);
 	void enable_wakeup(std::function<void()> func);
 	void disable_wakeup();
 	bool check_and_clear_wakeup();
+
+	void read_128_samples(unsigned int interval_ms) {
+		InterruptLock lock;
+		system_timer->cancel_schedule(m_timer_task);
+		m_read_interval = interval_ms;
+		m_is_reading = true;
+		m_read_count = 0;
+		read_xyz_timer();
+	}
 
 private:
 	NrfIRQ m_irq;
@@ -46,6 +61,40 @@ private:
 	static void delay_us(uint32_t period, void *intf_ptr);
 	double convert_g_force(unsigned int g_scale, int16_t axis_value);
     void bma400_check_rslt(const char api_name[], int8_t rslt);
+
+	//prediction sampling at constant interval
+	union __attribute__((packed)) {
+        uint8_t buffer[6];
+        struct {
+        	int16_t x;
+        	int16_t y;
+        	int16_t z;
+        };
+    } bma400_data;
+	bool m_is_reading;
+	int16_t m_read_count;
+	unsigned int m_read_interval;// we want it 20Hz -> 50ms
+	Timer::TimerHandle m_timer_task;//
+
+	void read_xyz_timer(void) {
+		InterruptLock lock; //todo: should this take priority?
+		if (!m_is_reading)
+			return;
+
+		// get and save data
+		bma400_get_regs(BMA400_REG_ACCEL_DATA, bma400_data.buffer, sizeof(bma400_data.buffer), &m_bma400_dev);
+		// printf should not be in an interruptLock !! //replace with mem-log or buffer
+        printf("xyz=%ul,%ul,%ul", bma400_data.x, bma400_data.y, bma400_data.z); //todo
+
+		m_read_count++;
+		if (m_read_count < 128) {
+			//reschedule
+			m_timer_task = system_timer->add_schedule([this]() {
+				if (m_is_reading)
+					read_xyz_timer();
+			}, system_timer->get_counter() + m_read_interval);
+		}
+	}
 };
 
 
@@ -62,4 +111,5 @@ private:
 	double m_last_x;
 	double m_last_y;
 	double m_last_z;
+	uint8_t m_last_predict;
 };
