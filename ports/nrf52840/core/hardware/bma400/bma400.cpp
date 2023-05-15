@@ -228,6 +228,50 @@ void BMA400LL::read_xyz(double& x, double& y, double& z)
     bma400_check_rslt("BMA400LL::read_xyz() bma400_set_power_mode sleep", rslt);
 }
 
+
+void BMA400LL::dump_x_axis(uint16_t *buffer)
+{
+    int8_t rslt;
+
+    // Turn accelerometer on so AXL is updated
+    rslt = bma400_set_power_mode(BMA400_MODE_NORMAL, &m_bma400_dev);
+    bma400_check_rslt("BMA400LL::predict_movement() bma400_set_power_mode normal", rslt);
+
+    // Wait 50ms for reading (4 averaged samples, @ 100 Hz)
+    PMU::delay_ms(50);
+
+    // Read and convert accelerometer values
+    // union __attribute__((packed)) {
+    //     uint8_t buffer[6];
+    //     struct {
+    //     	int16_t x;
+    //     	int16_t y;
+    //     	int16_t z;
+    //     };
+    // } data;
+
+    // for (size_t i = 0; i < 128; i++)
+    // {
+    
+    //     rslt = bma400_get_regs(BMA400_REG_ACCEL_DATA, data.buffer, sizeof(data.buffer), &m_bma400_dev);
+    //     // bma400_check_rslt("BMA400LL::predict_movement() bma400_get_regs", rslt);
+
+    //     // Convert to double precision G-force result on each axis
+    //     x = convert_g_force(16, data.x);
+    //     y = convert_g_force(16, data.y);
+    //     z = convert_g_force(16, data.z);
+
+    //     DEBUG_TRACE("BMA400LL::predict_movement: xyz=%f,%f,%f", x, y, z);
+    // }
+    
+    // read 64 samples periodically and save to buffer
+    read_64_x_samples(BMA400_PREDICT_READ_INTERVAL_MS, buffer);
+    
+    // Turn accelerometer on so AXL is updated
+    rslt = bma400_set_power_mode(BMA400_MODE_SLEEP, &m_bma400_dev);
+    bma400_check_rslt("BMA400LL::predict_movement() bma400_set_power_mode sleep", rslt);
+}
+
 //todo: this is where I should read 128 samples at 20Hz so -> PMU:delay_ms()
 void BMA400LL::predict_movement(uint8_t& prediction)
 {
@@ -266,8 +310,9 @@ void BMA400LL::predict_movement(uint8_t& prediction)
     //     DEBUG_TRACE("BMA400LL::predict_movement: xyz=%f,%f,%f", x, y, z);
     // }
     
-    // read 128 samples periodically and save to buffer
-    read_128_samples(BMA400_PREDICT_READ_INTERVAL_MS);
+    // // read 64 samples periodically and save to buffer
+	// uint16_t buffer[BMA400_AXL_BUF_MAX];
+    // read_64_x_samples(BMA400_PREDICT_READ_INTERVAL_MS, buffer);
 
     // algorythm here 
     // 1. read buffer (to be created) todo
@@ -386,7 +431,7 @@ bool BMA400LL::check_and_clear_wakeup()
 	return value;
 }
 
-BMA400::BMA400() : Sensor("AXL"), m_bma400(BMA400LL(BMA400_DEVICE, BMA400_ADDRESS, BMA400_WAKEUP_PIN)), m_last_x(0), m_last_y(0), m_last_z(0)
+BMA400::BMA400() : Sensor("AXL"), m_bma400(BMA400LL(BMA400_DEVICE, BMA400_ADDRESS, BMA400_WAKEUP_PIN)), m_last_x(0), m_last_y(0), m_last_z(0), m_last_predict(0)
 {
 	DEBUG_TRACE("BMA400::BMA400");
 }
@@ -414,6 +459,9 @@ double BMA400::read(unsigned int offset)
         m_bma400.predict_movement(m_last_predict);
         return m_last_predict;
         break;
+    case 6:
+        m_bma400.dump_x_axis(m_axis_buffer);
+        return 0;
 	default:
 		return 0;
 	}

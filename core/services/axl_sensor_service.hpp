@@ -6,27 +6,29 @@
 #include "timeutils.hpp"
 
 struct __attribute__((packed)) AXLLogEntry {
-	// union { //todo: think about this possibility
-	LogHeader header;
-	union {
+	union { //todo: think about this possibility
 		struct {
-			double x;
-			double y;
-			double z;
-			double temperature;
-			bool   wakeup_triggered;
-			uint8_t movement_predict; // todo: maybe use up the whole AXLLogEntry data buffer to log readings (maybe only one axis)
+			LogHeader header;
+			union {
+				struct {
+					double x;
+					double y;
+					double z;
+					double temperature;
+					bool   wakeup_triggered;
+					uint8_t movement_predict; // todo: maybe use up the whole AXLLogEntry data buffer to log readings (maybe only one axis)
+				};
+				uint8_t data[MAX_LOG_PAYLOAD]; // log payload is basically 128-9 = 119 bytes
+			};
 		};
-		uint8_t data[MAX_LOG_PAYLOAD]; // log payload is basically 128-9 = 119 bytes
+		uint16_t data_dump[MAX_LOG_SIZE/2]; // For header-less data dump
 	};
-	// uint8_t axl_data_stream;
-	// };
 };
 
 class AXLLogFormatter : public LogFormatter {
 public:
 	const std::string header() override {
-		return "log_datetime,x,y,z,wakeup_triggered,temperature\r\n";
+		return "log_datetime,x,y,z,wakeup_triggered,temperature,movement_predict\r\n";
 	}
 	const std::string log_entry(const LogEntry& e) override {
 		char entry[512], d1[128];
@@ -39,9 +41,10 @@ public:
 		std::strftime(d1, sizeof(d1), "%d/%m/%Y %H:%M:%S", tm);
 
 		// Convert to CSV
-		snprintf(entry, sizeof(entry), "%s,%f,%f,%f,%u,%f\r\n",
+		snprintf(entry, sizeof(entry), "%s,%f,%f,%f,%u,%f,%u\r\n",
 				d1,
-				log->x, log->y, log->z, log->wakeup_triggered, log->temperature);
+				log->x, log->y, log->z, log->wakeup_triggered, log->temperature,
+				log->movement_predict);
 		return std::string(entry);
 	}
 };
@@ -52,7 +55,8 @@ enum AXLSensorPort : unsigned int {
 	Y,
 	Z,
 	WAKEUP_TRIGGERED,
-	MOVEMENT_PREDICT
+	MOVEMENT_PREDICT,
+	DUMP_X
 };
 
 enum AXLCalibration : unsigned int {
@@ -71,6 +75,13 @@ public:
 private:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
+
+	void read_axl_and_populate_log_entry(LogEntry *e) {
+		AXLLogEntry *log = (AXLLogEntry *)e;
+		log->data_dump = m_sensor.read(AXLSensorPort::DUMP_X);
+	}
+
+
 	void read_and_populate_log_entry(LogEntry *e) override {
 		AXLLogEntry *log = (AXLLogEntry *)e;
 		log->x = m_sensor.read(AXLSensorPort::X);
