@@ -115,11 +115,12 @@ public:
 	void install_event_handler(unsigned int, std::function<void()>) override;
 	void remove_event_handler(unsigned int) override;
 
+	uint16_t m_axis_buffer[BMA400_AXL_BUF_MAX];
+
 private:
 	BMA400LL m_bma400;
 	double m_last_x;
 	double m_last_y;
 	double m_last_z;
 	uint8_t m_last_predict;
-	uint16_t m_axis_buffer[BMA400_AXL_BUF_MAX];
 };

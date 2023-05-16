@@ -21,7 +21,7 @@ struct __attribute__((packed)) AXLLogEntry {
 				uint8_t data[MAX_LOG_PAYLOAD]; // log payload is basically 128-9 = 119 bytes
 			};
 		};
-		char data_dump[128*2]; // For header-less data dump
+		uint16_t data_dump[128*2]; // For header-less data dump
 	};
 };
 
@@ -47,7 +47,7 @@ public:
 		// 		log->x, log->y, log->z, log->wakeup_triggered, log->temperature,
 		// 		log->movement_predict);
 		
-		snprintf(entry, sizeof(entry), "%s\r\n",log->data_dump);
+		snprintf(entry, sizeof(entry), "%hn\r\n",log->data_dump);
 		return std::string(entry);
 	}
 };
@@ -94,11 +94,14 @@ private:
 		// log->temperature = m_sensor.read((unsigned int)AXLSensorPort::TEMPERATURE);
 		// log->movement_predict = m_sensor.read(AXLSensorPort::MOVEMENT_PREDICT);
 		// service_set_log_header_time(log->header, service_current_time());
-		char test_data[] = "This is a string of 120 bytes long to see if it can be stored in the memory for retrieval of the accelerometer data...";
-		printf("%s\r\n",test_data);
+
+
+		//char test_data[] = "This is a string of 120 bytes long to see if it can be stored in the memory for retrieval of the accelerometer data...";
+		//printf("%s\r\n",test_data);
 		// log->data_dump = "This is a string of 120 bytes long to see if it can be stored in the memory for retrieval of the accelerometer data...\r\n";
-		snprintf(log->data_dump, sizeof(log->data_dump), "%s\r\n",test_data);
-		printf("%s\r\n",log->data_dump);
+		//snprintf(log->data_dump, sizeof(log->data_dump), "%s\r\n",test_data);
+		
+		printf("%hn\r\n",log->data_dump);
 	}
 #pragma GCC diagnostic pop
 
