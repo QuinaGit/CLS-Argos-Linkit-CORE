@@ -460,7 +460,7 @@ double BMA400::read(unsigned int offset)
         return m_last_predict;
         break;
     case 6:
-        m_bma400.dump_x_axis(m_axis_buffer);
+        // m_bma400.dump_x_axis(m_axis_buffer);
         return 0;
 	default:
 		return 0;
