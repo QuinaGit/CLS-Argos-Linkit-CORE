@@ -91,7 +91,7 @@ void BMA400LL::init()
     // Modify the desired configurations as per macros - available in bma400_defs.h file
     m_bma400_sensor_conf.type                 = BMA400_ACCEL;
     m_bma400_sensor_conf.param.accel.odr      = BMA400_ODR_100HZ;
-    m_bma400_sensor_conf.param.accel.range    = BMA400_RANGE_16G;
+    m_bma400_sensor_conf.param.accel.range    = BMA400_RANGE_8G;
     m_bma400_sensor_conf.param.accel.data_src = BMA400_DATA_SRC_ACCEL_FILT_2;
 
     /* Set the desired configurations to the sensor */
@@ -112,7 +112,6 @@ void BMA400LL::init()
 
 int8_t BMA400LL::i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t length, void *intf_ptr)
 {
-    DEBUG_TRACE("BMA400LL::i2c_write -> intf_ptr=%p, *(uint8_t *)intf_ptr=%x", intf_ptr, *(uint8_t *)intf_ptr);
 
     BMA400LL& device = BMA400LLManager::lookup_device(*(uint8_t *)intf_ptr);
 
@@ -128,24 +127,19 @@ int8_t BMA400LL::i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t l
 
     NrfI2C::write(device.m_bus, device.m_addr, (uint8_t*)buffer, length + sizeof(reg_addr), false);
 
-    DEBUG_TRACE("BMA400LL::i2c_write %x : %x",reg_addr, reg_data);
 
     return BMA400_OK;
 }
 
 int8_t BMA400LL::i2c_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t length, void *intf_ptr)
 {
-    DEBUG_TRACE("BMA400LL::i2c_read -> intf_ptr=%p, *(uint8_t *)intf_ptr=%x", intf_ptr, *(uint8_t *)intf_ptr);
 
     BMA400LL& device = BMA400LLManager::lookup_device(*(uint8_t *)intf_ptr);
 
-    DEBUG_TRACE("BMA400LL::i2c_read -> device.m_addr=%p, &reg_addr=%p", device.m_addr, &reg_addr);
 
     NrfI2C::write(device.m_bus, device.m_addr, &reg_addr, sizeof(reg_addr), true);
-    DEBUG_TRACE("BMA400LL::i2c_read -> (uint8_t*)reg_data=%p, reg_data=%p", (uint8_t*)reg_data, reg_data);
 
 	NrfI2C::read(device.m_bus, device.m_addr, (uint8_t*)reg_data, length);
-    DEBUG_TRACE("BMA400LL::i2c_read %x : %x",reg_addr, reg_data);
 
     return BMA400_OK;
 }
@@ -157,9 +151,8 @@ void BMA400LL::delay_us(uint32_t period, void *intf_ptr)
 
 double BMA400LL::convert_g_force(unsigned int g_scale, int16_t axis_value)
 {
-    // acc_x = acc_c_7_0 + 256*acc_x_11_8
-    // if(acc_x > 2047) acc_x = acc_x-4096
-	return (double)g_scale * axis_value / 32768;
+    if (axis_value > 2047) axis_value = axis_value - 4096;
+	return (double)g_scale * axis_value / 0xFFF;
 }
 
 void BMA400LL::bma400_check_rslt(const char api_name[], int8_t rslt)
@@ -217,9 +210,9 @@ void BMA400LL::read_xyz(double& x, double& y, double& z)
     bma400_check_rslt("BMA400LL::read_xyz() bma400_get_regs", rslt);
 
     // Convert to double precision G-force result on each axis
-    x = convert_g_force(16, data.x);
-    y = convert_g_force(16, data.y);
-    z = convert_g_force(16, data.z);
+    x = convert_g_force(8, data.x);
+    y = convert_g_force(8, data.y);
+    z = convert_g_force(8, data.z);
 
     DEBUG_TRACE("BMA400LL::read_xyz: xyz=%f,%f,%f", x, y, z);
 
@@ -228,48 +221,27 @@ void BMA400LL::read_xyz(double& x, double& y, double& z)
     bma400_check_rslt("BMA400LL::read_xyz() bma400_set_power_mode sleep", rslt);
 }
 
-
 void BMA400LL::dump_x_axis(uint16_t *buffer)
 {
     int8_t rslt;
 
     // Turn accelerometer on so AXL is updated
     rslt = bma400_set_power_mode(BMA400_MODE_NORMAL, &m_bma400_dev);
-    bma400_check_rslt("BMA400LL::predict_movement() bma400_set_power_mode normal", rslt);
+    bma400_check_rslt("BMA400LL::dump_x_axis() bma400_set_power_mode normal", rslt);
 
     // Wait 50ms for reading (4 averaged samples, @ 100 Hz)
     PMU::delay_ms(50);
 
-    // Read and convert accelerometer values
-    // union __attribute__((packed)) {
-    //     uint8_t buffer[6];
-    //     struct {
-    //     	int16_t x;
-    //     	int16_t y;
-    //     	int16_t z;
-    //     };
-    // } data;
-
-    // for (size_t i = 0; i < 128; i++)
-    // {
+    // read samples periodically and save to buffer
+    read_x_samples(BMA400_PREDICT_READ_INTERVAL_MS, buffer);
     
-    //     rslt = bma400_get_regs(BMA400_REG_ACCEL_DATA, data.buffer, sizeof(data.buffer), &m_bma400_dev);
-    //     // bma400_check_rslt("BMA400LL::predict_movement() bma400_get_regs", rslt);
-
-    //     // Convert to double precision G-force result on each axis
-    //     x = convert_g_force(16, data.x);
-    //     y = convert_g_force(16, data.y);
-    //     z = convert_g_force(16, data.z);
-
-    //     DEBUG_TRACE("BMA400LL::predict_movement: xyz=%f,%f,%f", x, y, z);
-    // }
-    
-    // read 64 samples periodically and save to buffer
-    read_64_x_samples(BMA400_PREDICT_READ_INTERVAL_MS, buffer);
-    
+    while (m_is_reading) {
+        // fill buffer before returning
+        PMU::delay_ms(BMA400_PREDICT_READ_INTERVAL_MS*2);
+    }
     // Turn accelerometer on so AXL is updated
     rslt = bma400_set_power_mode(BMA400_MODE_SLEEP, &m_bma400_dev);
-    bma400_check_rslt("BMA400LL::predict_movement() bma400_set_power_mode sleep", rslt);
+    bma400_check_rslt("BMA400LL::dump_x_axis() bma400_set_power_mode sleep", rslt);
 }
 
 //todo: this is where I should read 128 samples at 20Hz so -> PMU:delay_ms()
@@ -312,7 +284,7 @@ void BMA400LL::predict_movement(uint8_t& prediction)
     
     // // read 64 samples periodically and save to buffer
 	// uint16_t buffer[BMA400_AXL_BUF_MAX];
-    // read_64_x_samples(BMA400_PREDICT_READ_INTERVAL_MS, buffer);
+    // read_x_samples(BMA400_PREDICT_READ_INTERVAL_MS, buffer, BMA400_AXL_BUF_MAX);
 
     // algorythm here 
     // 1. read buffer (to be created) todo
@@ -459,12 +431,15 @@ double BMA400::read(unsigned int offset)
         m_bma400.predict_movement(m_last_predict);
         return m_last_predict;
         break;
-    case 6:
-        // m_bma400.dump_x_axis(m_axis_buffer);
-        return 0;
 	default:
 		return 0;
 	}
+}
+
+void BMA400::dump_read(void* buffer)
+{
+    printf("this is the dump_read function");
+    m_bma400.dump_x_axis((uint16_t *)buffer);
 }
 
 void BMA400::calibration_write(const double value, const unsigned int offset)

@@ -14,6 +14,7 @@ public:
 	Sensor(const char *name = "Sensor");
 	virtual ~Sensor();
 	virtual double read(unsigned int port = 0) = 0;
+	virtual void dump_read(void* buffer = 0) {}
 	virtual void install_event_handler(unsigned int, std::function<void()>) {}
 	virtual void remove_event_handler(unsigned int) {}
 };

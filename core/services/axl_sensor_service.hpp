@@ -5,8 +5,12 @@
 #include "sensor_service.hpp"
 #include "timeutils.hpp"
 
+// switch between logging accelerometer -- also do it in bma400.h
+#define AXL_LOG_TYPE 		2 	//0:single-default, 1:predict, 2:stream-dump
+#define AXL_DATADUMP_SIZE 	128
+
 struct __attribute__((packed)) AXLLogEntry {
-	union { //todo: think about this possibility
+	union {
 		struct {
 			LogHeader header;
 			union {
@@ -16,12 +20,12 @@ struct __attribute__((packed)) AXLLogEntry {
 					double z;
 					double temperature;
 					bool   wakeup_triggered;
-					uint8_t movement_predict; // todo: maybe use up the whole AXLLogEntry data buffer to log readings (maybe only one axis)
+					uint8_t movement_predict;
 				};
-				uint8_t data[MAX_LOG_PAYLOAD]; // log payload is basically 128-9 = 119 bytes
+				uint8_t data[MAX_LOG_PAYLOAD];
 			};
 		};
-		uint16_t data_dump[128*2]; // For header-less data dump
+		uint16_t data_dump[AXL_DATADUMP_SIZE]; // For headerless data dump
 	};
 };
 
@@ -32,23 +36,30 @@ public:
 	}
 	// I need to use this function called by 
 	const std::string log_entry(const LogEntry& e) override {
-		char entry[512];//, d1[128];
+		char entry[512];
 		const AXLLogEntry *log = (const AXLLogEntry *)&e;
-		// std::time_t t;
-		// std::tm *tm;
 
-		// t = convert_epochtime(log->header.year, log->header.month, log->header.day, log->header.hours, log->header.minutes, log->header.seconds);
-		// tm = std::gmtime(&t);
-		// std::strftime(d1, sizeof(d1), "%d/%m/%Y %H:%M:%S", tm);
+#if AXL_LOG_TYPE == 2	// Data Dump
+		std::memcpy(entry, log->data_dump, AXL_DATADUMP_SIZE * sizeof(uint16_t));
 
-		// // Convert to CSV
-		// snprintf(entry, sizeof(entry), "%s,%f,%f,%f,%u,%f,%u\r\n",
-		// 		d1,
-		// 		log->x, log->y, log->z, log->wakeup_triggered, log->temperature,
-		// 		log->movement_predict);
+		return std::string(entry, AXL_DATADUMP_SIZE * sizeof(uint16_t));
+#else //Single measurement or prediction
+		char d1[128];
+		std::time_t t;
+		std::tm *tm;
+
+		t = convert_epochtime(log->header.year, log->header.month, log->header.day, log->header.hours, log->header.minutes, log->header.seconds);
+		tm = std::gmtime(&t);
+		std::strftime(d1, sizeof(d1), "%d/%m/%Y %H:%M:%S", tm);
+
+		// Convert to CSV
+		snprintf(entry, sizeof(entry), "%s,%f,%f,%f,%u,%f,%u\r\n",
+				d1,
+				log->x, log->y, log->z, log->wakeup_triggered, log->temperature,
+				log->movement_predict);
 		
-		snprintf(entry, sizeof(entry), "%hn\r\n",log->data_dump);
 		return std::string(entry);
+#endif
 	}
 };
 
@@ -58,8 +69,7 @@ enum AXLSensorPort : unsigned int {
 	Y,
 	Z,
 	WAKEUP_TRIGGERED,
-	MOVEMENT_PREDICT,
-	DUMP_X
+	MOVEMENT_PREDICT
 };
 
 enum AXLCalibration : unsigned int {
@@ -78,30 +88,28 @@ public:
 private:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
-
-	// void read_axl_and_populate_log_entry(LogEntry *e) {
-	// 	AXLLogEntry *log = (AXLLogEntry *)e;
-	// 	log->data_dump = m_sensor.read(AXLSensorPort::DUMP_X);
-	// }
-
-
 	void read_and_populate_log_entry(LogEntry *e) override {
 		AXLLogEntry *log = (AXLLogEntry *)e;
-		// log->x = m_sensor.read(AXLSensorPort::X);
-		// log->y = m_sensor.read(AXLSensorPort::Y);
-		// log->z = m_sensor.read(AXLSensorPort::Z);
-		// log->wakeup_triggered = m_sensor.read(AXLSensorPort::WAKEUP_TRIGGERED);
-		// log->temperature = m_sensor.read((unsigned int)AXLSensorPort::TEMPERATURE);
-		// log->movement_predict = m_sensor.read(AXLSensorPort::MOVEMENT_PREDICT);
-		// service_set_log_header_time(log->header, service_current_time());
+#if AXL_LOG_TYPE == 2
+		m_sensor.dump_read((void*)log->data_dump); //!todo: this hack might be the temporary solution
 
-
-		//char test_data[] = "This is a string of 120 bytes long to see if it can be stored in the memory for retrieval of the accelerometer data...";
-		//printf("%s\r\n",test_data);
-		// log->data_dump = "This is a string of 120 bytes long to see if it can be stored in the memory for retrieval of the accelerometer data...\r\n";
-		//snprintf(log->data_dump, sizeof(log->data_dump), "%s\r\n",test_data);
-		
-		printf("%hn\r\n",log->data_dump);
+		DEBUG_TRACE("AXLSensorService::read_and_populate_log_entry ... log->data_dump=%x",log->data_dump);
+		uint16_t i;
+		for (i = 0; i < AXL_DATADUMP_SIZE; i++)
+		{
+			printf("%d:%x\r\n",i,log->data_dump[i]);
+		}
+#else
+  #if AXL_LOG_TYPE == 1
+		log->movement_predict = m_sensor.read(AXLSensorPort::MOVEMENT_PREDICT);
+  #endif 
+		log->x = m_sensor.read(AXLSensorPort::X);
+		log->y = m_sensor.read(AXLSensorPort::Y);
+		log->z = m_sensor.read(AXLSensorPort::Z);
+		log->wakeup_triggered = m_sensor.read(AXLSensorPort::WAKEUP_TRIGGERED);
+		log->temperature = m_sensor.read((unsigned int)AXLSensorPort::TEMPERATURE);
+		service_set_log_header_time(log->header, service_current_time());
+#endif
 	}
 #pragma GCC diagnostic pop
 

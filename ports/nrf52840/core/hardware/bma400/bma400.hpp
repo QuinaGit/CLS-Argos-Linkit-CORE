@@ -14,10 +14,9 @@ extern "C" {
 
 extern Timer *system_timer;
 
-/*! Read write length varies based on user requirement */
-#define BMA400_READ_WRITE_LENGTH  		UINT8_C(64)
-#define BMA400_PREDICT_READ_INTERVAL_MS	UINT8_C(50)
-#define BMA400_AXL_BUF_MAX 				UINT16_C(64)
+#define BMA400_READ_WRITE_LENGTH  		UINT8_C(64)		// Accelerometer varies based on user requirement
+#define BMA400_PREDICT_READ_INTERVAL_MS	UINT8_C(50)		// 20Hz -> 50ms
+#define BMA400_AXL_BUF_MAX 				UINT16_C(128)	// Measurement size
 
 class BMA400LL
 {
@@ -36,16 +35,16 @@ public:
 	void disable_wakeup();
 	bool check_and_clear_wakeup();
 
-	void read_64_x_samples(unsigned int interval_ms, uint16_t *buffer) {
+	void read_x_samples(unsigned int interval_ms, uint16_t *buffer) {
+		DEBUG_TRACE("BMA400LL::read_64_x_samples");
 		InterruptLock lock;
 		system_timer->cancel_schedule(m_timer_task);
 		m_read_interval = interval_ms;
 		m_is_reading = true;
-		m_read_count = 0;
+		m_read_idx = 0;
 		p_buffer = buffer;
 		read_x_timer();
 	};
-
 
 private:
 	NrfIRQ m_irq;
@@ -76,32 +75,29 @@ private:
         	int16_t z;
         };
     } bma400_data;
-	bool m_is_reading;
-	uint16_t m_read_count;
-	unsigned int m_read_interval;// we want it 20Hz -> 50ms
+
+	bool m_is_reading = false;
+	uint16_t m_read_idx;
+	unsigned int m_read_interval;
 	uint16_t *p_buffer;
-	Timer::TimerHandle m_timer_task;//
+	Timer::TimerHandle m_timer_task;
 
 	void read_x_timer() {
-		InterruptLock lock; //todo: should this take priority?
+		InterruptLock lock;
 		if (!m_is_reading)
 			return;
 
-		// get and save data
-		bma400_get_regs(BMA400_REG_ACCEL_DATA, (uint8_t *)(p_buffer+m_read_count), 2, &m_bma400_dev);  //todo: check
-		// printf should not be in an interruptLock !! //replace with mem-log or buffer
-        // printf("xyz=%ul,%ul,%ul", bma400_data.x, bma400_data.y, bma400_data.z); //todo
-		printf("p_buffer=%p, p_buffer[m_read_count]=%ul",p_buffer,p_buffer[m_read_count]);
+		bma400_get_regs(BMA400_REG_ACCEL_DATA, (uint8_t *)(p_buffer+m_read_idx), 2, &m_bma400_dev);
 
-		// buffer[m_read_count] = bma400_data.x; //check m_read_count to be safe
-
-		m_read_count++;
-		if (m_read_count < BMA400_AXL_BUF_MAX) {
-			//reschedule
+		m_read_idx++;
+		if (m_read_idx < BMA400_AXL_BUF_MAX) {
 			m_timer_task = system_timer->add_schedule([this]() {
 				if (m_is_reading)
 					read_x_timer();
 			}, system_timer->get_counter() + m_read_interval);
+		}
+		else {
+			m_is_reading = false;
 		}
 	};
 };
@@ -115,6 +111,7 @@ public:
 	void install_event_handler(unsigned int, std::function<void()>) override;
 	void remove_event_handler(unsigned int) override;
 
+	void dump_read(void* buffer) override;
 	uint16_t m_axis_buffer[BMA400_AXL_BUF_MAX];
 
 private:
